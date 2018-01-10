@@ -57,6 +57,10 @@ from bravado.requests_client import RequestsClient
 from bravado.swagger_model import Loader
 from bravado.warning import warn_for_deprecated_op
 
+import aiotask_context as context
+import asyncio
+from uuid import uuid4
+
 log = logging.getLogger(__name__)
 
 
@@ -283,6 +287,8 @@ def construct_request(operation, request_options, **op_kwargs):
         'headers': request_options.get('headers', {}),
     }
 
+    request = inject_trace_token(request)
+
     # Copy over optional request options
     for request_option in ('connect_timeout', 'timeout'):
         if request_option in request_options:
@@ -322,3 +328,19 @@ def construct_params(operation, request, op_kwargs):
                     '{0} is a required parameter'.format(remaining_param.name))
             if not remaining_param.required and remaining_param.has_default():
                 marshal_param(remaining_param, None, request)
+
+
+def inject_trace_token(request):
+    if 'X-Trace-Token' not in request['headers']:
+        trace_token = str(uuid4())
+        try:
+            task = asyncio.Task.current_task()
+            # If there is an async context: inject the trace token into the headers
+            if task and hasattr(task, 'context'):
+                trace_token = context.get('X-Trace-Token') or str(uuid4())
+        except RuntimeError:
+            # If we are not using asyncio, ^^^ will raise a RuntimeError
+            pass
+
+        request['headers']['X-Trace-Token'] = trace_token
+    return request
